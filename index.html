@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Football Match: Defensive Interception Demo</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #0a4b0a;
+    color: white;
+    margin: 20px;
+    user-select: none;
+  }
+  h1 {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .controls {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  #pitch {
+    display: block;
+    margin: 0 auto;
+    background-color: #2c8c2c;
+    border: 3px solid #fff;
+    border-radius: 15px;
+    position: relative;
+  }
+  .player-circle {
+    cursor: pointer;
+    stroke: #fff;
+    stroke-width: 2;
+    transition: fill 0.3s, stroke-width 0.3s;
+  }
+  .team1 {
+    fill: #0044cc;
+  }
+  .team2 {
+    fill: #cc2200;
+  }
+  .player-label {
+    fill: white;
+    font-weight: bold;
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    user-select: none;
+    font-size: 14px;
+  }
+  #output {
+    text-align: center;
+    margin-top: 10px;
+    font-weight: bold;
+  }
+  button {
+    margin-left: 15px;
+    padding: 5px 12px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  #startGameBtn:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+  }
+  .ball {
+    fill: yellow;
+    stroke: orange;
+    stroke-width: 2;
+    r: 8;
+  }
+  .intercept-zone {
+    fill: rgba(255,255,255,0.1);
+    stroke: rgba(255,255,255,0.3);
+    pointer-events: none;
+  }
+  .celebrate {
+    animation: pulse 0.6s infinite alternate;
+  }
+  @keyframes pulse {
+    from { transform: scale(1); opacity: 1; }
+    to   { transform: scale(1.3); opacity: 0.7; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Football Match: Defensive Interception Demo</h1>
+
+<div class="controls">
+  <label for="attackingTeamSelect">Choose Attacking Team: </label>
+  <select id="attackingTeamSelect">
+    <option value="1">Team 1 (Blue)</option>
+    <option value="2">Team 2 (Red)</option>
+  </select>
+  <button id="resetBtn">Reset Positions</button>
+  <button id="startGameBtn">Start Game</button>
+</div>
+
+<svg id="pitch" width="900" height="500" viewBox="0 0 900 500" aria-label="Football pitch with players">
+  <rect x="0" y="0" width="900" height="500" fill="#2c8c2c" />
+  <rect x="0" y="0" width="900" height="500" fill="none" stroke="#fff" stroke-width="4" rx="20" ry="20" />
+  <line x1="450" y1="0" x2="450" y2="500" stroke="#fff" stroke-width="4" />
+  <circle cx="450" cy="250" r="70" stroke="#fff" stroke-width="4" fill="none" />
+  <circle cx="450" cy="250" r="12" fill="#fff" />
+  <rect x="0" y="150" width="120" height="200" fill="none" stroke="#fff" stroke-width="4" rx="10" ry="10" />
+  <rect x="0" y="210" width="40" height="80" fill="none" stroke="#fff" stroke-width="4" rx="5" ry="5" />
+  <rect x="780" y="150" width="120" height="200" fill="none" stroke="#fff" stroke-width="4" rx="10" ry="10" />
+  <rect x="860" y="210" width="40" height="80" fill="none" stroke="#fff" stroke-width="4" rx="5" ry="5" />
+  <rect x="-10" y="210" width="20" height="80" fill="#fff" />
+  <rect x="890" y="210" width="20" height="80" fill="#fff" />
+</svg>
+
+<div id="output">Drag players to position them, select attacking team, then click "Start Game".</div>
+
+<script>
+const svg = document.getElementById('pitch');
+const output = document.getElementById('output');
+const startGameBtn = document.getElementById('startGameBtn');
+const resetBtn = document.getElementById('resetBtn');
+const attackingTeamSelect = document.getElementById('attackingTeamSelect');
+
+const playerRadius = 18;
+const interceptionRadius = 30;
+
+const team1Count = 11;
+const team2Count = 11;
+
+const team1Names = ['A','B','C','D','E','F','G','H','I','J','K'];
+const team2Names = ['L','M','N','O','P','Q','R','S','T','U','V'];
+
+let players = {};
+let playerElements = {};
+let draggingId = null;
+let offsetX = 0, offsetY = 0;
+let animationRunning = false;
+let ball = null;
+let ballIntercepted = false;
+
+function initPlayers() {
+  players = {};
+  for(let i=0; i<team1Count; i++) {
+    players[team1Names[i]] = {
+      name: team1Names[i],
+      team: 1,
+      x: Math.random()*350 + 50,
+      y: Math.random()*400 + 50
+    };
+  }
+  for(let i=0; i<team2Count; i++) {
+    players[team2Names[i]] = {
+      name: team2Names[i],
+      team: 2,
+      x: Math.random()*350 + 500,
+      y: Math.random()*400 + 50
+    };
+  }
+}
+
+function drawPlayers() {
+  Object.values(playerElements).forEach(el => svg.removeChild(el.group));
+  playerElements = {};
+
+  for(const id in players) {
+    const p = players[id];
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute("class", "player-group");
+    group.setAttribute("data-id", id);
+
+    const interceptCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    interceptCircle.setAttribute("r", interceptionRadius);
+    interceptCircle.setAttribute("cx", p.x);
+    interceptCircle.setAttribute("cy", p.y);
+    interceptCircle.setAttribute("class", "intercept-zone");
+    interceptCircle.style.display = "none";
+    group.appendChild(interceptCircle);
+
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("r", playerRadius);
+    circle.setAttribute("cx", p.x);
+    circle.setAttribute("cy", p.y);
+    circle.setAttribute("class", p.team === 1 ? "player-circle team1" : "player-circle team2");
+    group.appendChild(circle);
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", p.x);
+    text.setAttribute("y", p.y + 2);
+    text.setAttribute("class", "player-label");
+    text.textContent = p.name;
+    group.appendChild(text);
+
+    svg.appendChild(group);
+    playerElements[id] = {group, circle, text, interceptCircle};
+  }
+}
+
+function updatePlayerPos(id, x, y) {
+  players[id].x = x;
+  players[id].y = y;
+  const el = playerElements[id];
+  el.circle.setAttribute("cx", x);
+  el.circle.setAttribute("cy", y);
+  el.text.setAttribute("x", x);
+  el.text.setAttribute("y", y + 2);
+  el.interceptCircle.setAttribute("cx", x);
+  el.interceptCircle.setAttribute("cy", y);
+}
+
+svg.addEventListener("mousedown", (e) => {
+  if(animationRunning) return;
+  if(e.target.classList.contains("player-circle")) {
+    draggingId = e.target.parentNode.getAttribute("data-id");
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const cursorpt = pt.matrixTransform(svg.getScreenCTM().inverse());
+    offsetX = players[draggingId].x - cursorpt.x;
+    offsetY = players[draggingId].y - cursorpt.y;
+  }
+});
+svg.addEventListener("mousemove", (e) => {
+  if(!draggingId) return;
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const cursorpt = pt.matrixTransform(svg.getScreenCTM().inverse());
+  let newX = cursorpt.x + offsetX;
+  let newY = cursorpt.y + offsetY;
+  newX = Math.min(Math.max(newX, playerRadius), 900 - playerRadius);
+  newY = Math.min(Math.max(newY, playerRadius), 500 - playerRadius);
+  updatePlayerPos(draggingId, newX, newY);
+});
+svg.addEventListener("mouseup", () => { draggingId = null; });
+svg.addEventListener("mouseleave", () => { draggingId = null; });
+
+resetBtn.addEventListener("click", () => {
+  if(animationRunning) return;
+  initPlayers();
+  drawPlayers();
+  output.textContent = 'Positions reset. Drag players to position them, select attacking team, then click "Start Game".';
+});
+
+startGameBtn.addEventListener("click", () => {
+  if(animationRunning) return;
+  animationRunning = true;
+  output.textContent = "Game started! Watching for interceptions...";
+  const attackingTeam = parseInt(attackingTeamSelect.value);
+  for(const id in playerElements) {
+    const p = players[id];
+    if(p.team !== attackingTeam) {
+      playerElements[id].interceptCircle.style.display = "block";
+    } else {
+      playerElements[id].interceptCircle.style.display = "none";
+    }
+  }
+  setTimeout(() => {
+    simulateBallPass(attackingTeam);
+  }, 1000);
+});
+
+function distance(x1,y1,x2,y2) {
+  return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
+}
+
+function simulateBallPass(attackingTeam) {
+  ballIntercepted = false;
+
+  const attackers = Object.values(players).filter(p => p.team === attackingTeam);
+  const defenders = Object.values(players).filter(p => p.team !== attackingTeam);
+
+  if(attackers.length < 2) {
+    output.textContent = "Not enough attackers to pass.";
+    animationRunning = false;
+    return;
+  }
+
+  let passer = attackers[Math.floor(Math.random()*attackers.length)];
+  let receiver;
+  do {
+    receiver = attackers[Math.floor(Math.random()*attackers.length)];
+  } while(receiver.name === passer.name);
+
+  output.textContent = `Player ${passer.name} passes to ${receiver.name}`;
+
+  if(ball) svg.removeChild(ball);
+  ball = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  ball.setAttribute("r", 10);
+  ball.setAttribute("class", "ball");
+  ball.setAttribute("cx", passer.x);
+  ball.setAttribute("cy", passer.y);
+  svg.appendChild(ball);
+
+  const duration = 3000;
+  const startTime = performance.now();
+
+  function animate(time) {
+    if(ballIntercepted) return;
+
+    const elapsed = time - startTime;
+    let progress = elapsed / duration;
+    if(progress > 1) progress = 1;
+
+    const ballX = passer.x + (receiver.x - passer.x) * progress;
+    const ballY = passer.y + (receiver.y - passer.y) * progress;
+
+    ball.setAttribute("cx", ballX);
+    ball.setAttribute("cy", ballY);
+
+    for(const def of defenders) {
+      const dist = distance(ballX, ballY, def.x, def.y);
+      if(dist <= interceptionRadius) {
+        ballIntercepted = true;
+        output.textContent = `Ball intercepted by defender ${def.name}!`;
+        animateDefenderIntercept(def, ballX, ballY);
+        return;
+      }
+    }
+
+    if(progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      output.textContent = `Ball reached ${receiver.name}, pass successful!`;
+      setTimeout(() => {
+        simulateGoalAttempt(attackingTeam, receiver.x, receiver.y);
+      }, 800);
+    }
+  }
+  requestAnimationFrame(animate);
+}
+
+function animateDefenderIntercept(defender, targetX, targetY) {
+  const el = playerElements[defender.name];
+  if(!el) return;
+
+  const startX = defender.x;
+  const startY = defender.y;
+  const duration = 600;
+  const startTime = performance.now();
+
+  function move(time) {
+    const elapsed = time - startTime;
+    let progress = elapsed / duration;
+    if(progress > 1) progress = 1;
+
+    const newX = startX + (targetX - startX) * progress;
+    const newY = startY + (targetY - startY) * progress;
+
+    updatePlayerPos(defender.name, newX, newY);
+    ball.setAttribute("cx", newX);
+    ball.setAttribute("cy", newY);
+
+    if(progress < 1) {
+      requestAnimationFrame(move);
+    } else {
+      output.textContent += " Defender caught the ball!";
+      setTimeout(() => {
+        if(ball) {
+          svg.removeChild(ball);
+          ball = null;
+        }
+        cleanupAfterPlay();
+      }, 2000);
+    }
+  }
+  requestAnimationFrame(move);
+}
+
+function simulateGoalAttempt(attackingTeam, fromX, fromY) {
+  const defenders = Object.values(players).filter(p => p.team !== attackingTeam);
+  const goal = (attackingTeam === 1)
+    ? { x1: 860, x2: 900, y1: 210, y2: 290 }
+    : { x1: 0, x2: 40, y1: 210, y2: 290 };
+
+  const targetX = (attackingTeam === 1) ? 890 : 10;
+  const targetY = fromY;
+
+  const duration = 2500;
+  const startTime = performance.now();
+  let intercepted = false;
+
+  function animate(time) {
+    if(intercepted) return;
+    const elapsed = time - startTime;
+    let progress = elapsed / duration;
+    if(progress > 1) progress = 1;
+
+    const ballX = fromX + (targetX - fromX) * progress;
+    const ballY = fromY;
+
+    ball.setAttribute("cx", ballX);
+    ball.setAttribute("cy", ballY);
+
+    for(const def of defenders) {
+      if(distance(ballX, ballY, def.x, def.y) <= interceptionRadius) {
+        intercepted = true;
+        output.textContent = `Shot intercepted by defender ${def.name}!`;
+        animateDefenderIntercept(def, ballX, ballY);
+        return;
+      }
+    }
+
+    if(
+      ballX >= goal.x1 && ballX <= goal.x2 &&
+      ballY >= goal.y1 && ballY <= goal.y2
+    ) {
+      output.textContent = `GOAL by Team ${attackingTeam}! 🎯`;
+      celebrateTeam(attackingTeam);
+      return;
+    }
+
+    if(progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      output.textContent = `Shot missed the goal. No goal scored.`;
+      cleanupAfterPlay();
+    }
+  }
+
+  requestAnimationFrame(animate);
+}
+
+function celebrateTeam(team) {
+  for(const id in players) {
+    if(players[id].team === team) {
+      playerElements[id].circle.classList.add('celebrate');
+    }
+  }
+  setTimeout(() => {
+    if(ball) {
+      svg.removeChild(ball);
+      ball = null;
+    }
+    cleanupAfterPlay();
+  }, 2500);
+}
+
+function cleanupAfterPlay() {
+  animationRunning = false;
+  for(const id in playerElements) {
+    playerElements[id].interceptCircle.style.display = "none";
+    playerElements[id].circle.classList.remove('celebrate');
+  }
+}
+
+// Initialize on load
+initPlayers();
+drawPlayers();
+</script>
+
+</body>
+</html>
+
+
